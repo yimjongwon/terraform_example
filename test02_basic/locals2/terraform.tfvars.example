@@ -1,0 +1,9 @@
+# 개발 환경을 넣어주세요 (dev | prod)
+env = "개발환경"
+
+# 프로젝트 이름을 넣어주세요
+project_name = "프로젝트명"
+
+# DB 비밀번호를 작성해 주세요 (option)
+db_password = "비밀번호"
+
