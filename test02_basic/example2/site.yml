@@ -1,0 +1,22 @@
+# 만들어진 ec2에 nginx 를 배포하고 실행하는 playbook
+---
+- name: Nginx 설치 및 서비스 기동
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Nginx 설치
+      dnf:
+        name: nginx
+        state: present
+
+    - name: Nginx 서비스 시작 및 활성화
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: 테스트 인덱스 페이지
+      copy:
+        content: "<h1>Ansible deployed by terraform {{ inventory_hostname }}</h1>"
+        dest: /usr/share/nginx/html/index.html
