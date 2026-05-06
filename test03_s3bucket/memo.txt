@@ -1,0 +1,24 @@
+[ec2-user@ip-10-0-1-71 ~]$ aws s3 ls
+2026-04-30 02:31:22 ktcloud-bucket-5ac10d1c
+
+[ec2-user@ip-10-0-1-71 ~]$ aws s3 ls s3://ktcloud-bucket-5ac10d1c
+2026-04-30 02:39:57        587 memo.txt
+
+[ec2-user@ip-10-0-1-71 ~]$ echo "hello s3 bucket" -> message.txt
+
+[ec2-user@ip-10-0-1-71 ~]$ aws s3 cp message.txt s3://ktcloud-bucket-5ac10d1c
+upload: ./message.txt to s3://ktcloud-bucket-5ac10d1c/message.txt 
+
+[ec2-user@ip-10-0-1-71 ~]$ aws s3 ls s3://ktcloud-bucket-5ac10d1c
+2026-04-30 02:39:57        587 memo.txt
+2026-04-30 02:43:02         18 message.txt
+
+[ec2-user@ip-10-0-1-71 ~]$ aws s3 cp s3://ktcloud-bucket-5ac10d1c/memo.txt  ./copied_memo.txt
+download: s3://ktcloud-bucket-5ac10d1c/memo.txt to ./copied_memo.txt
+
+[ec2-user@ip-10-0-1-71 ~]$ aws s3 rm s3://ktcloud-bucket-5ac10d1c/memo.txt
+delete: s3://ktcloud-bucket-5ac10d1c/memo.txt
+
+[ec2-user@ip-10-0-1-71 ~]$ aws s3 rm s3://ktcloud-bucket-5ac10d1c/ --recursive
+delete: s3://ktcloud-bucket-5ac10d1c/message.txt
+
