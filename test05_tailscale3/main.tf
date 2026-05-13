@@ -6,7 +6,26 @@ terraform {
         source = "hashicorp/aws"
         version = "~> 6.0"
     }
+    # tailscale provider 추가
+    tailscale = {
+        source = "tailscale/tailscale"
+        version = "0.17.2"
+    }
   }
+}
+
+# tailscale api 키와 tailnet_name 등록하기
+provider "tailscale" {
+    api_key = var.tailscale_api_key
+    tailnet = var.tailnet_name
+}
+
+# tailscale auth 키 생성
+resource "tailscale_tailnet_key" "ec2_join_key" {
+    reusable = true
+    ephemeral = false
+    preauthorized = true
+    expiry = 3600
 }
 
 # 1. provider 설정
@@ -242,55 +261,49 @@ resource "aws_instance" "my_ec2" {
         # 1. 호스트네임 및 시스템 기본 설정
         hostnamectl set-hostname "${var.host_name}"
         echo "127.0.0.1 ${var.host_name}" >> /etc/hosts
-        dnf install -y jq
 
-        # 2. Tailscale 설치 및 IP 포워딩 활성화
+        # 2. 인터넷 대기 (Private Subnet이므로 NAT 준비 대기)
+        until ping -c 1 8.8.8.8 &> /dev/null; do
+            sleep 5
+        done
+
+        # 3. Tailscale 설치 및 IP 포워딩 활성화
         curl -fsSL https://tailscale.com/install.sh | sh
         systemctl enable --now tailscaled
         
-        # 3. IP Forwarding 활성화
+        # 4. IP Forwarding 활성화
         cat <<EOT > /etc/sysctl.d/99-tailscale.conf
         net.ipv4.ip_forward = 1
         net.ipv6.conf.all.forwarding = 1
         EOT
         sysctl -p /etc/sysctl.d/99-tailscale.conf
 
-        # 4. Tailscale 로그인 및 경로 광고 (Subnet Router 설정)
-        tailscale up --authkey=${var.tailscale_auth_key} --advertise-routes=${aws_vpc.main.cidr_block} --accept-routes
-
-        # 5. 기기 찾기 : 최대 6번(총 2분) 동안 기기 ID를 찾을 때까지 재시도
-        DEVICE_ID=""
-        for i in {1..6}; do
-            echo "API 조회 시도 $i/6..."
-            
-            DEVICES_JSON=$(curl -s -u "${var.tailscale_api_key}:" "https://api.tailscale.com/api/v2/tailnet/${var.tailnet_name}/devices")
-            DEVICE_ID=$(echo $DEVICES_JSON | jq -r --arg HOST "${var.host_name}" '.devices[] | select(.hostname == $HOST) | .id')
-
-            if [ -n "$DEVICE_ID" ] && [ "$DEVICE_ID" != "null" ]; then
-                echo "기기 발견! ID: $DEVICE_ID"
-                break
-            fi
-            
-            echo "아직 기기가 목록에 없습니다. 20초 후 다시 시도합니다..."
-            sleep 20
-        done
-
-        # 6. ID가 확인되면 라우팅 승인 API 전송
-        if [ -z "$DEVICE_ID" ] || [ "$DEVICE_ID" == "null" ]; then
-            echo "Error: Device ID not found. Please check Tailscale Admin Console."
-        else
-            echo "Sending Route Approval API..."
-            curl -s -u "${var.tailscale_api_key}:" -X POST "https://api.tailscale.com/api/v2/device/$DEVICE_ID/routes" \
-                 -H "Content-Type: application/json" \
-                 -d "{\"routes\": [\"${aws_vpc.main.cidr_block}\"]}"
-            echo "Process Completed Successfully."
-        fi
+        # 5. Tailscale 가입 (생성된 Auth Key 사용)
+        # --advertise-routes만 던져두면, 승인은 테라폼이 밖에서 해줍니다.
+        tailscale up --authkey=${tailscale_tailnet_key.ec2_join_key.key} \
+                     --advertise-routes=${aws_vpc.main.cidr_block} \
+                     --accept-routes
     EOF
     
     tags = {
         Name = "my-ec2"
     }
 }
+
+# 테라폼이 기기를 찾고 라우팅을 승인하는 부분
+data "tailscale_device" "my_ec2_device" {
+  # db-server 호스트를 tailscale에서 승인하도록 체크
+  hostname   = var.host_name
+  wait_for   = "150s" # 기기가 리스트에 뜰 때까지 테라폼이 기다려줍니다.
+  depends_on = [aws_instance.my_ec2]
+}
+
+# vpc로 가는길 뚫어주기
+resource "tailscale_device_subnet_routes" "approve_vpc_routes" {
+  device_id = data.tailscale_device.my_ec2_device.id
+  routes    = [aws_vpc.main.cidr_block]
+}
+
 
 # Public IP 출력 제거 및 Private IP만 유지
 output "instance_private_ip"{
@@ -327,9 +340,9 @@ resource "terraform_data" "wait_for_instance"{
     triggers_replace = aws_instance.my_ec2.id
 
     provisioner "local-exec" {
-        # user_data에서 Tailscale 세팅이 완벽히 끝날 때까지 넉넉하게 대기 (2분 30초)
+        # user_data에서 Tailscale 세팅이 완벽히 끝날 때까지 넉넉하게 대기 (240초)
         # Tailscale 경로가 PC까지 갱신되어야 Ansible이 Private IP로 접근 가능합니다.
-        command = "sleep 150"
+        command = "sleep 240"
     }
 }
 
@@ -340,8 +353,8 @@ resource "terraform_data" "ansible_run"{
         always_run  = "${timestamp()}" 
     }
     provisioner "local-exec" {
-      # command = "ANSIBLE_SSH_PIPELINING=1 ansible-playbook site.yml"
-        command = "echo 'tailscale success!' "
+        command = "ANSIBLE_SSH_PIPELINING=1 ansible-playbook site.yml"
+       #command = "echo 'tailscale success!' "
     }
 }
 

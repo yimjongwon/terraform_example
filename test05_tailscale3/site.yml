@@ -1,0 +1,58 @@
+---
+- name: "PostgreSQL 설치 및 셋업 (Ansible Galaxy  Role 활용)"
+  hosts: all
+  become: yes
+
+  # 설치할 때 환경 변수를 여기서 설정한다
+  vars:
+    # 네트워크 접속 허용 및 필수 기본값 나열하기(구조상 하나만 수정하려고 해도 다른것도 모두 나열해야 한다)
+    postgresql_global_config_options:
+      # 롤이 구동되기 위해 반드시 필요한 기본값들 나열하기
+      - option: unix_socket_directories
+        value: '/var/run/postgresql'
+      - option: log_directory
+        value: "{{ 'log' if ansible_os_family == 'RedHat' else '/var/log/postgresql' }}"
+      # 적용하고 싶었던 외부 접속 설정
+      - option: listen_addresses
+        value: "*"
+
+    postgresql_hba_entries:
+      # 1. 로컬(소켓) 접속: postgres 계정은 비번 없이(peer) 통과
+      - { type: local, database: all, user: postgres, address: '', auth_method: peer }
+      
+      # 2. 로컬(TCP) 접속: 서버 내부에서 localhost로 접근하는 건 허용
+      - { type: host,  database: all, user: all, address: '127.0.0.1/32', auth_method: md5 }
+      - { type: host,  database: all, user: all, address: '::1/128', auth_method: md5 }
+      
+      # 3. [보안 핵심] 외부에서 postgres 계정으로 들어오면 묻지도 따지지도 않고 차단(reject)!
+      # - { type: host,  database: all, user: postgres, address: '0.0.0.0/0', auth_method: reject }
+      
+      # 4. 외부 접속: 그 외 나머지 모든 계정(scott 등)은 비번 맞으면 통과
+      - { type: host,  database: all, user: all, address: '0.0.0.0/0', auth_method: md5 }
+
+  # 실제 실행할 롤(role) 호출
+  roles:
+    - geerlingguy.postgresql
+
+  # DB 설치 완료후 DB를 복구하는 작업
+  post_tasks:
+    - name: "1. mgmt 가 가지고 있는(s3에 있는) 백업 파일을 타겟 서버로 전송"
+      ansible.builtin.copy:
+        src: "./full_db_backup.sql"
+        dest: "/tmp/full_db_backup.sql"
+        owner: postgres
+        group: postgres
+        mode: '0644'
+
+    - name: "2. 백업파일을 이용해서 전체 데이터 복구"
+      ansible.builtin.shell:
+        cmd: "psql -f /tmp/full_db_backup.sql postgres"
+      become_user: postgres
+      ignore_errors: yes
+      # 이미 데이터가 복구되어 에러가 날 수 있으므로, 에러가 나도 다음 단계 진행
+      register: restore_result
+
+    - name: "3. 복구 결과 확인"
+      debug:
+        msg: "데이터 복구 작업이 완료 되었습니다"
+      when: restore_result is succeeded
