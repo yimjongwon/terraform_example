@@ -249,6 +249,53 @@ output "instance_private_ip"{
     value = aws_instance.my_ec2.private_ip
 }
 
+resource "local_file" "ansible_inventory"{
+    filename = "${path.module}/inventory.yml"
+    content = yamlencode({
+        all = {
+            hosts = {
+                # [수정] 인벤토리에 EC2의 Private IP 기록
+                "${aws_instance.my_ec2.private_ip}" = {
+                    ansible_user = "ec2-user"
+                    ansible_ssh_private_key_file = "${path.module}/lecture-key.pem"
+                }
+            }
+        }
+    })
+}
+
+resource "local_file" "ansible_config"{
+    filename = "${path.module}/ansible.cfg"
+    content = <<-EOF
+        [defaults]
+        inventory = ./inventory.yml
+        host_key_checking = False
+    EOF
+}
+
+resource "terraform_data" "wait_for_instance"{
+    depends_on = [aws_instance.my_ec2, local_file.ansible_inventory, local_file.ansible_config]
+    triggers_replace = aws_instance.my_ec2.id
+
+    provisioner "local-exec" {
+        # user_data에서 Tailscale 세팅이 완벽히 끝날 때까지 넉넉하게 대기 (2분 30초)
+        # Tailscale 경로가 PC까지 갱신되어야 Ansible이 Private IP로 접근 가능합니다.
+        command = "sleep 150"
+    }
+}
+
+resource "terraform_data" "ansible_run"{
+    depends_on = [ terraform_data.wait_for_instance ]
+    triggers_replace = {
+        instance_id = aws_instance.my_ec2.id
+        always_run  = "${timestamp()}" 
+    }
+    provisioner "local-exec" {
+      # command = "ANSIBLE_SSH_PIPELINING=1 ansible-playbook site.yml"
+        command = "echo 'tailscale success!' "
+    }
+}
+
 # 변수정의
 variable "host_name" {
     type = string

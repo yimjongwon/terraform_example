@@ -13,3 +13,6 @@
 
 # Crash log files
 crash.log
+
+# 민감한 정보가 들어 있는 파일은 git의 추적 대상에서 제외
+terraform.tfvars

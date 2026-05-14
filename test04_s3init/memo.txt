@@ -1,0 +1,13 @@
+# 생성된 s3 bucket 이름
+db-backup-storage-9fe4f90b
+
+# 버킷 s3의 내용 지우기
+
+#리스트확인
+# aws s3 ls s3://db-backup-storage-9fe4f90b/
+
+# 모두삭제(모두 삭제해야 destory 된다)
+aws s3 rm s3://db-backup-storage-9fe4f90b/ --recursive
+
+# 모두 삭제후에 terraform destroy 하면 s3 bucket도 같이 삭제된다.
+
